@@ -15,6 +15,56 @@
 #include <boost/assign/list_of.hpp>
 
 #include "chainparamsseeds.h"
+#include "arith_uint256.h"
+#include "streams.h"
+#include "hash.h"
+#include "miner.h"
+
+#define CREATE_GENESIS false
+
+
+bool static ScanHash(const CBlockHeader *pblock, uint32_t& nNonce, uint256 *phash)
+{
+    // Write the first 76 bytes of the block header to a double-SHA256 state.
+    CHash256 hasher;
+    CDataStream ss(SER_NETWORK, PROTOCOL_VERSION);
+    ss << *pblock;
+    assert(ss.size() == 80);
+    hasher.Write((unsigned char*)&ss[0], 76);
+
+    while (true) {
+        nNonce++;
+
+        // Write the last 4 bytes of the block header (the nonce) to a copy of
+        // the double-SHA256 state, and compute the result.
+        CHash256(hasher).Write((unsigned char*)&nNonce, 4).Finalize((unsigned char*)phash);
+
+        // Return the nonce if the hash has at least some zero bits,
+        // caller will check if it has enough to reach the target
+        if (((uint16_t*)phash)[15] == 0)
+            return true;
+
+        // If nothing found after trying for a while, return -1
+        if ((nNonce & 0xfff) == 0)
+            return false;
+    }
+}
+
+uint32_t getNonceForGenesis(const CBlock & genesisBlock)
+{
+    arith_uint256 hashTarget = arith_uint256().SetCompact(genesisBlock.nBits);
+    uint256 hash;
+    uint32_t nNonce = 0;
+    while (true) {
+        if (ScanHash(&genesisBlock, nNonce, &hash))
+        {
+            if (UintToArith256(hash) <= hashTarget)
+            {
+                return nNonce;
+            }
+        }
+    }
+}
 
 static CBlock CreateGenesisBlock(const char* pszTimestamp, const CScript& genesisOutputScript, uint32_t nTime, uint32_t nNonce, uint32_t nBits, int32_t nVersion, const CAmount& genesisReward)
 {
@@ -34,6 +84,12 @@ static CBlock CreateGenesisBlock(const char* pszTimestamp, const CScript& genesi
     genesis.vtx.push_back(txNew);
     genesis.hashPrevBlock.SetNull();
     genesis.hashMerkleRoot = BlockMerkleRoot(genesis);
+    #if CREATE_GENESIS
+        genesis.nNonce = getNonceForGenesis(genesis);
+        std::cout<<"genesis nonce : " << genesis.nNonce << std::endl;
+        std::cout<<"genesis hash  : " << genesis.GetHash().GetHex() << std::endl;
+        std::cout<<"genesis hashMerkleRoot  : " << BlockMerkleRoot(genesis).GetHex() << std::endl;
+    #endif
     return genesis;
 }
 
@@ -50,7 +106,7 @@ static CBlock CreateGenesisBlock(const char* pszTimestamp, const CScript& genesi
  */
 static CBlock CreateGenesisBlock(uint32_t nTime, uint32_t nNonce, uint32_t nBits, int32_t nVersion, const CAmount& genesisReward)
 {
-    const char* pszTimestamp = "The Times 03/Jan/2009 Chancellor on brink of second bailout for banks";
+    const char* pszTimestamp = "rrnc init at 2018.05.06 11:30";
     const CScript genesisOutputScript = CScript() << ParseHex("04678afdb0fe5548271967f1a67130b7105cd6a828e03909a67962e0ea1f61deb649f6bc3f4cef38c4f35504e51ec112de5c384df7ba0b8d578a4c702b6bf11d5f") << OP_CHECKSIG;
     return CreateGenesisBlock(pszTimestamp, genesisOutputScript, nTime, nNonce, nBits, nVersion, genesisReward);
 }
@@ -76,10 +132,10 @@ public:
         consensus.nMajorityWindow = 1000;
         consensus.BIP34Height = 0;
         consensus.BIP34Hash = uint256S("0x00");
-        consensus.powLimit = uint256S("00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+        consensus.powLimit = uint256S("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         consensus.nPowTargetTimespan = 14 * 24 * 60 * 60; // two weeks
         consensus.nPowTargetSpacing = 10 * 60;
-        consensus.fPowAllowMinDifficultyBlocks = true;
+        consensus.fPowAllowMinDifficultyBlocks = false;
         consensus.fPowNoRetargeting = false;
         consensus.nRuleChangeActivationThreshold = 1916; // 95% of 2016
         consensus.nMinerConfirmationWindow = 2016; // nPowTargetTimespan / nPowTargetSpacing
@@ -106,10 +162,12 @@ public:
         nMaxTipAge = 24 * 60 * 60;
         nPruneAfterHeight = 100000;
 
-        genesis = CreateGenesisBlock(1231006505, 2083236893, 0x1d00ffff, 1, 50 * COIN);
+        genesis = CreateGenesisBlock(1231006505, 504762, 0x1e7fffff, 1, 50 * COIN);
         consensus.hashGenesisBlock = genesis.GetHash();
-        assert(consensus.hashGenesisBlock == uint256S("0x000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f"));
-        assert(genesis.hashMerkleRoot == uint256S("0x4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b"));
+
+        assert(consensus.hashGenesisBlock == uint256S("0x0000357729e10adadbfa3e7ab9663125cd040edce63a6abc6beb48baa64e06f6"));
+        assert(genesis.hashMerkleRoot == uint256S("0xaf455316a218ae518be423dcc2a5fa6c072257215ebabee7fb4b8f419f52252b"));
+        
 
         /*vSeeds.push_back(CDNSSeedData("bitcoin.sipa.be", "seed.bitcoin.sipa.be")); // Pieter Wuille
         vSeeds.push_back(CDNSSeedData("bluematt.me", "dnsseed.bluematt.me")); // Matt Corallo
@@ -118,7 +176,7 @@ public:
         vSeeds.push_back(CDNSSeedData("xf2.org", "bitseed.xf2.org")); // Jeff Garzik
         vSeeds.push_back(CDNSSeedData("bitcoin.jonasschnelli.ch", "seed.bitcoin.jonasschnelli.ch")); // Jonas Schnelli
         */
-       vSeeds.push_back(CDNSSeedData("127.0.0.1", "127.0.0.1"));
+       //vSeeds.push_back(CDNSSeedData("127.0.0.1", "127.0.0.1"));
 
         base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1,0);
         base58Prefixes[SCRIPT_ADDRESS] = std::vector<unsigned char>(1,5);
@@ -128,7 +186,7 @@ public:
 
         vFixedSeeds = std::vector<SeedSpec6>(pnSeed6_main, pnSeed6_main + ARRAYLEN(pnSeed6_main));
 
-        fMiningRequiresPeers = true;
+        fMiningRequiresPeers = false;
         fDefaultConsistencyChecks = false;
         fRequireStandard = true;
         fMineBlocksOnDemand = false;
@@ -200,8 +258,8 @@ public:
 
         genesis = CreateGenesisBlock(1296688602, 414098458, 0x1d00ffff, 1, 50 * COIN);
         consensus.hashGenesisBlock = genesis.GetHash();
-        assert(consensus.hashGenesisBlock == uint256S("0x000000000933ea01ad0ee984209779baaec3ced90fa3f408719526f8d77f4943"));
-        assert(genesis.hashMerkleRoot == uint256S("0x4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b"));
+        //assert(consensus.hashGenesisBlock == uint256S("0x000000000933ea01ad0ee984209779baaec3ced90fa3f408719526f8d77f4943"));
+        //assert(genesis.hashMerkleRoot == uint256S("0x4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b"));
 
         vFixedSeeds.clear();
         vSeeds.clear();
@@ -272,8 +330,8 @@ public:
 
         genesis = CreateGenesisBlock(1296688602, 2, 0x207fffff, 1, 50 * COIN);
         consensus.hashGenesisBlock = genesis.GetHash();
-        assert(consensus.hashGenesisBlock == uint256S("0x0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206"));
-        assert(genesis.hashMerkleRoot == uint256S("0x4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b"));
+        //assert(consensus.hashGenesisBlock == uint256S("0x0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206"));
+       // assert(genesis.hashMerkleRoot == uint256S("0x4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b"));
 
         vFixedSeeds.clear(); //! Regtest mode doesn't have any fixed seeds.
         vSeeds.clear();  //! Regtest mode doesn't have any DNS seeds.
